@@ -192,9 +192,13 @@ sleep 2
 agent-browser eval "document.querySelector('button').click(); 'clicked'"
 ```
 
-### CDP 连接已有浏览器
+### CDP 连接已有浏览器（已有窗口不能用）
 
-正常打开的浏览器没有 CDP 端口，必须重启：
+**典型场景**：用户 Edge 里已登录 GitHub，agent-browser 却开了新窗口 → 新窗口没有登录态 → 用户要重登一遍。这是 agent-browser 最大的 UX 坑——不能直接操控已有窗口。
+
+**根因**：正常打开的浏览器没有 CDP 调试端口，agent-browser 无法注入控制。唯一办法是杀进程重启，带 `--remote-debugging-port` 启动一个新实例。但新实例没有旧 session 的 cookie，用户必须重新登录。
+
+**解决方案**：
 
 ```bash
 # 关闭所有 Edge
