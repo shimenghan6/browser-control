@@ -154,6 +154,63 @@ browser = cloakbrowser.launch(headless=False)
 | 遇到验证码/反爬拦截 | 被Bot检测到 | 切 CloakBrowser 隐身引擎 |
 | nodriver `uc.start()` 卡住 | 浏览器进程冲突 | 放弃nodriver，用 agent-browser eval |
 | 翻页点击没反应 | 百度动态加载 | 直接URL加 `&pn=10` 翻页 |
+| snapshot 返回空 | SPA/React页面，DOM动态渲染 | 放弃 snapshot，直接用 `eval` 查 DOM |
+| `inp.value = 'x'` 后表单无效 | React 劫持了 input setter | 用 `nativeInputValueSetter` + `dispatchEvent` |
+| eval 内 `setTimeout` 不触发 | eval 同步返回后脚本退出 | 拆成两个 eval + shell `sleep` 等待 |
+| 连不上已有浏览器窗口 | 浏览器未开 CDP 调试端口 | 关闭所有窗口，`msedge --remote-debugging-port=9222` 重启 |
+
+## eval 高级技巧
+
+### React 表单输入（nativeInputValueSetter）
+
+React 劫持了 `<input>` 的 value setter，直接赋值不触发状态更新：
+
+```js
+// ❌ 不生效
+document.getElementById('repo-name').value = 'my-repo';
+
+// ✅ 生效
+const nativeSetter = Object.getOwnPropertyDescriptor(
+  window.HTMLInputElement.prototype, 'value'
+).set;
+nativeSetter.call(inp, 'my-repo');
+inp.dispatchEvent(new Event('input', {bubbles: true}));
+inp.dispatchEvent(new Event('change', {bubbles: true}));
+```
+
+### eval 中禁止 setTimeout/async
+
+eval 同步返回后脚本立即退出，异步回调来不及执行：
+
+```bash
+# ❌ 不生效 —— setTimeout 回调不会触发
+agent-browser eval "setTimeout(() => btn.click(), 500); 'done'"
+
+# ✅ 拆成两步
+agent-browser eval "fillForm(); 'filled'"
+sleep 2
+agent-browser eval "document.querySelector('button').click(); 'clicked'"
+```
+
+### CDP 连接已有浏览器
+
+正常打开的浏览器没有 CDP 端口，必须重启：
+
+```bash
+# 关闭所有 Edge
+taskkill //F //IM msedge.exe
+
+# 重启带调试端口
+"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe" \
+  --remote-debugging-port=9222 \
+  "https://目标URL"
+
+# 验证端口
+curl http://127.0.0.1:9222/json/version
+
+# 连接
+agent-browser --cdp 9222 open "URL"
+```
 
 ## 方案切换决策树
 
