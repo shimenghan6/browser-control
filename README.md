@@ -1,8 +1,8 @@
 # browser-control
 
-> AI Agent 浏览器操控统一入口。一个指令打开网页、搜索、点击、填表、截图——卡住了自己换方案，不纠结、不等你问。
+> 让 Claude Code 替你上网。说"搜一下 React 19"、"打开京东找机械键盘"、"帮我在 GitHub 上查 xxx 项目"——浏览器自动打开、搜索、点击、读完告诉你。卡住了自己换方案，四层备选永不卡死。
 
-**装上之后，跟 Claude Code 说"搜一下 xxx"或"打开 xxx 网站"，它就自动操控浏览器完成。四层备选方案，碰到问题自动切换。**
+**agent-browser → chrome-devtools-mcp → nodriver → CloakBrowser，一套指令全自动切换。你的 Claude Code 从此有了眼睛和手。**
 
 ```
 agent-browser (主力) → chrome-devtools-mcp (备选) → nodriver (最后手段)
