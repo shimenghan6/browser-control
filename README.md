@@ -34,13 +34,15 @@ agent-browser (主力) → chrome-devtools-mcp (备选) → nodriver (最后手�
 
 ### 一键安装
 
-```bash
-# Linux/macOS
-bash install.sh
+**Windows**：下载 `install.bat` → **双击运行**
 
-# Windows
-install.bat
+**macOS / Linux**：
+
+```bash
+bash install.sh
 ```
+
+### 手动安装
 
 ### 手动安装
 
