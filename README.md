@@ -2,7 +2,7 @@
 
 > 让 Claude Code 替你上网。说"搜一下 React 19"、"打开京东找机械键盘"、"帮我在 GitHub 上查 xxx 项目"——浏览器自动打开、搜索、点击、读完告诉你。卡住了自己换方案，四层备选永不卡死。
 
-**agent-browser → chrome-devtools-mcp → nodriver → CloakBrowser，一套指令全自动切换。你的 Claude Code 从此有了眼睛和手。**
+**agent-browser (Rust CLI) → chrome-devtools-mcp (Google CDP) → nodriver (Python) → CloakBrowser (反检测)。四层备选，无缝切换。装上后 Claude Code 能替你上网——搜索、点击、填表、截图、翻页，全自动。**
 
 ```
 agent-browser (主力) → chrome-devtools-mcp (备选) → nodriver (最后手段)
