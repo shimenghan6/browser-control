@@ -6,9 +6,9 @@ description: |
   "帮我在网上查xxx", "用百度搜索", "上京东", any browser/search request.
 ---
 
-# 浏览器操控技能 - 四层架构
+# 浏览器操控技能 - 五层架构
 
-agent-browser(主力) → chrome-devtools-mcp(备选) → nodriver(最后手段)
+**★ 方案零：已有CDP窗口直连（最高优先级）** → agent-browser(主力) → chrome-devtools-mcp(备选) → nodriver(最后手段)
 反爬场景：CloakBrowser隐身引擎
 
 ## 核心原则
@@ -17,19 +17,138 @@ agent-browser(主力) → chrome-devtools-mcp(备选) → nodriver(最后手段)
 2. **不阻塞**：脚本不加 `input()` 等交互，执行完保持浏览器窗口让用户看到
 3. **用户可见**：agent-browser 永远加 `--headed`
 4. **卡住自愈**：同一方案卡住2次立刻换方案，不等用户问，不反复死磕
+5. **★ 已有窗口不新开（铁律）**：如果用户 Edge 已开 CDP 端口(9222)，必须用 Python + CDP WebSocket 操控已有标签页，不新开窗口/标签页。agent-browser --cdp 也会开新标签页，用户不接受。
 
 ## 自动路由规则
 
-| 网站类型 | 例子 | 控制层 |
-|------|------|------|
-| 国内大站（反爬） | 百度、京东、小红书、淘宝 | agent-browser / CloakBrowser |
-| 普通网站 | GitHub、MDN、Stack Overflow | agent-browser |
-| agent-browser卡住2次 | — | chrome-devtools-mcp（备选） |
-| 前两者均失败 | — | nodriver（最后手段） |
+| 优先级 | 方案 | 触发条件 |
+|--------|------|---------|
+| **0（最高）** | **Python + CDP WebSocket 直连已有标签页** | `curl http://127.0.0.1:9222/json/version` 有返回 → 用户浏览器已开CDP |
+| 1 | agent-browser | CDP端口未开，普通网站 |
+| 2 | chrome-devtools-mcp | agent-browser 卡住2次 |
+| 3 | nodriver | 前两者均失败 |
+| - | CloakBrowser | 反爬网站 |
 
 ---
 
-## 方案一：agent-browser（首选，所有网站）
+## 方案零：Python + CDP WebSocket 直连已有标签页（最高优先级）
+
+**触发条件：`curl http://127.0.0.1:9222/json/version` 返回正常 JSON。用户 Edge 已开 CDP 端口时，必须用此方案——不开任何新窗口/标签页。**
+
+### 核心原理
+
+agent-browser 的致命缺陷：`--cdp 9222` 虽然连上了用户浏览器，但 `open` 命令会新开标签页。用户看到"被操控开新页"体验极差。
+
+解决方案：绕过 agent-browser，用 Python `websockets` 库直接连 CDP WebSocket，在用户当前标签页上操作。
+
+### 第一步：检查 CDP 端口
+
+```bash
+curl -s http://127.0.0.1:9222/json/version
+# 返回 Browser/Protocol-Version → CDP 端口已开 → 走方案零
+# 连接失败 → CDP 未开 → 走方案一 agent-browser
+```
+
+### 第二步：列出已有标签页
+
+```bash
+python -c "
+import urllib.request, json
+resp = urllib.request.urlopen('http://127.0.0.1:9222/json')
+pages = json.loads(resp.read())
+for i, p in enumerate(pages):
+    print(f'[{i}] {p.get(\"title\",\"\")[:60]} | {p.get(\"url\",\"\")[:80]}')
+"
+```
+
+### 第三步：在已有标签页执行 JS（填表/点击/读取）
+
+```python
+import asyncio, json, urllib.request, websockets
+
+async def cdp_eval(url_match, script):
+    """在url包含url_match的已有标签页执行script，不新开窗口"""
+    resp = urllib.request.urlopen('http://127.0.0.1:9222/json')
+    pages = json.loads(resp.read())
+    
+    target = next((p for p in pages if url_match in p.get('url', '')), None)
+    if not target:
+        raise Exception(f'未找到包含 {url_match} 的标签页')
+    
+    print(f"操控已有标签页: {target['title'][:60]}")
+    
+    async with websockets.connect(target['webSocketDebuggerUrl']) as ws:
+        await ws.send(json.dumps({'id': 1, 'method': 'Runtime.enable'}))
+        await ws.recv()
+        
+        await ws.send(json.dumps({
+            'id': 2, 'method': 'Runtime.evaluate',
+            'params': {'expression': script, 'returnByValue': True}
+        }))
+        result = await ws.recv()
+        return json.loads(result)
+
+# 使用示例：在用户已打开的 github.com/new 页面创建仓库
+result = asyncio.run(cdp_eval('github.com/new', '''
+    (() => {
+        const s = Object.getOwnPropertyDescriptor(
+            window.HTMLInputElement.prototype, 'value'
+        ).set;
+        const inp = document.getElementById('repository-name-input');
+        s.call(inp, 'my-repo');
+        inp.dispatchEvent(new Event('input', {bubbles: true}));
+        return inp.value;
+    })()
+'''))
+print(result)
+```
+
+### 第四步：等 React 校验后点击（拆分两步）
+
+```python
+# Step 1: 填表
+asyncio.run(cdp_eval('github.com/new', '填充表单的JS...'))
+
+# Step 2: 等待 React 校验
+await asyncio.sleep(2)
+
+# Step 3: 点击提交
+asyncio.run(cdp_eval('github.com/new', '''
+    (() => {
+        const btns = document.querySelectorAll('button[type="submit"]');
+        for (const btn of btns) {
+            if (btn.textContent.includes('Create repository')) {
+                btn.click();
+                return 'clicked';
+            }
+        }
+        return 'not found';
+    })()
+'''))
+
+# Step 4: 验证跳转
+await asyncio.sleep(3)
+asyncio.run(cdp_eval('github.com', 'window.location.href'))
+```
+
+### 方案零 vs agent-browser --cdp 对比
+
+| 行为 | agent-browser --cdp | Python CDP WebSocket |
+|------|---------------------|---------------------|
+| 连接已有浏览器 | ✓ | ✓ |
+| 新开标签页 | ✗ 会新开 | ✓ 在已有标签页操作 |
+| SPA 填表 | eval 无区别 | eval 无区别 |
+| 用户感知 | "又被开了新页" | "就在我当前页面操作" |
+
+### 依赖
+
+```bash
+pip install websockets
+```
+
+---
+
+## 方案一：agent-browser（CDP 端口未开时使用）
 
 ### 启动（每次任务前必须做）
 
@@ -147,6 +266,8 @@ browser = cloakbrowser.launch(headless=False)
 
 | 问题 | 原因 | 解决 |
 |------|------|------|
+| 用户已有浏览器+CDP端口已开 | 这是最高优先级场景 | **★ 切方案零：Python CDP WebSocket 直连，不新开窗口** |
+| agent-browser --cdp 会新开标签页 | agent-browser 不支持指定已有标签页 | **不要用 agent-browser --cdp！用方案零 Python CDP WebSocket** |
 | `--headed ignored` 警告 | daemon已在运行 | `agent-browser close --all` 后重试 |
 | click @eXX 返回Done但页面没跳转 | daemon headless模式 | 改用 `agent-browser eval "document.querySelectorAll('h3 a')[N].click()"` |
 | 同一方案连续失败2次 | 当前方案不适用 | **切换方案二 chrome-devtools-mcp** |
@@ -192,13 +313,11 @@ sleep 2
 agent-browser eval "document.querySelector('button').click(); 'clicked'"
 ```
 
-### CDP 连接已有浏览器（已有窗口不能用）
+### CDP 连接已有浏览器
 
-**典型场景**：用户 Edge 里已登录 GitHub，agent-browser 却开了新窗口 → 新窗口没有登录态 → 用户要重登一遍。这是 agent-browser 最大的 UX 坑——不能直接操控已有窗口。
+**有 CDP 端口时（方案零）**：用户 Edge 已开 `--remote-debugging-port=9222`。不要用 agent-browser（会新开标签页），直接用 Python CDP WebSocket 操控已有标签页。详见上方"方案零"。
 
-**根因**：正常打开的浏览器没有 CDP 调试端口，agent-browser 无法注入控制。唯一办法是杀进程重启，带 `--remote-debugging-port` 启动一个新实例。但新实例没有旧 session 的 cookie，用户必须重新登录。
-
-**解决方案**：
+**无 CDP 端口时**：用户浏览器未开调试端口。需要用户手动重启：
 
 ```bash
 # 关闭所有 Edge
@@ -212,14 +331,19 @@ taskkill //F //IM msedge.exe
 # 验证端口
 curl http://127.0.0.1:9222/json/version
 
-# 连接
-agent-browser --cdp 9222 open "URL"
+# ★ 然后用方案零 Python CDP WebSocket，不要用 agent-browser！
 ```
 
 ## 方案切换决策树
 
 ```
-agent-browser(主力) --失败2次--> chrome-devtools-mcp(备选) --失败--> nodriver(最后手段)
+1. curl http://127.0.0.1:9222/json/version → 通？
+   ├→ YES → ★ 方案零：Python CDP WebSocket 直连已有标签页（不新开窗口）
+   └→ NO  → agent-browser --headed
+              ├→ 成功 → 继续
+              └→ 失败2次 → chrome-devtools-mcp
+                            ├→ 成功 → 继续
+                            └→ 失败 → nodriver(最后手段)
 反爬场景：直接使用 CloakBrowser 隐身引擎
 ```
 
