@@ -25,11 +25,12 @@ description: |
 步骤0: curl http://127.0.0.1:9222/json/version
   ├─ 有返回 → ★ 方案零：Python + CDP WebSocket 直连已有标签页（不新开窗口）
   └─ 无返回 → CDP 端口未开
-                ├─ 用户明确说"我有浏览器"/"用现有窗口" → 🛑 停止！告诉用户：
-                │     "你的浏览器没有开启调试端口。请关闭所有Edge窗口，然后运行：
-                │      msedge --remote-debugging-port=9222
-                │      重新打开后我就能直接操控你的现有窗口，不会再开新的。"
-                │     等用户执行后再回到步骤0。
+                ├─ 用户明确说"我有浏览器"/"用现有窗口" → 🛑 停止！自动帮用户开启CDP：
+                │     1. 不杀进程！用独立临时profile启动Edge：
+                │        start msedge --remote-debugging-port=9222 --user-data-dir="%USERPROFILE%/.cache/edge-cdp" "https://github.com"
+                │     2. 等4秒 → curl验证端口 → 进入方案零
+                │     3. 注意：这个新Edge窗口没有用户的登录态，需要用户手动登录一次
+                │     4. 如果用户不愿新开 → 给出手动命令让他们关闭所有Edge后带端口重启
                 │
                 └─ 用户没提现有窗口 → 方案一 agent-browser --headed
                                            ├─ 成功 → 继续
