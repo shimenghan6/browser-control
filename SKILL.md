@@ -21,10 +21,29 @@ description: |
 
 ## 自动路由规则
 
+```
+步骤0: curl http://127.0.0.1:9222/json/version
+  ├─ 有返回 → ★ 方案零：Python + CDP WebSocket 直连已有标签页（不新开窗口）
+  └─ 无返回 → CDP 端口未开
+                ├─ 用户明确说"我有浏览器"/"用现有窗口" → 🛑 停止！告诉用户：
+                │     "你的浏览器没有开启调试端口。请关闭所有Edge窗口，然后运行：
+                │      msedge --remote-debugging-port=9222
+                │      重新打开后我就能直接操控你的现有窗口，不会再开新的。"
+                │     等用户执行后再回到步骤0。
+                │
+                └─ 用户没提现有窗口 → 方案一 agent-browser --headed
+                                           ├─ 成功 → 继续
+                                           └─ 失败2次 → chrome-devtools-mcp
+                                                         ├─ 成功 → 继续
+                                                         └─ 失败 → nodriver(最后)
+反爬场景：CloakBrowser 隐身引擎
+```
+
 | 优先级 | 方案 | 触发条件 |
 |--------|------|---------|
-| **0（最高）** | **Python + CDP WebSocket 直连已有标签页** | `curl http://127.0.0.1:9222/json/version` 有返回 → 用户浏览器已开CDP |
-| 1 | agent-browser | CDP端口未开，普通网站 |
+| **0（最高）** | **Python + CDP WebSocket 直连已有标签页** | `curl http://127.0.0.1:9222/json/version` 有返回 |
+| 🛑 **中断** | **提示用户开启CDP端口** | CDP DOWN + 用户说"我有浏览器"/"用现有窗口" |
+| 1 | agent-browser | CDP DOWN + 用户没提现有窗口 |
 | 2 | chrome-devtools-mcp | agent-browser 卡住2次 |
 | 3 | nodriver | 前两者均失败 |
 | - | CloakBrowser | 反爬网站 |
